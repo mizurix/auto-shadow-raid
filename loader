@@ -1,9 +1,16 @@
 local success, errorMessage = pcall(function()
-local LOAD_DELAY = 10
+local LOAD_DELAY = 5
 
 do
 	local PlayersSvc = game:GetService("Players")
 	local CoreGuiSvc = game:GetService("CoreGui")
+
+	if not game:IsLoaded() then
+		game.Loaded:Wait()
+	end
+	repeat
+		task.wait()
+	until PlayersSvc.LocalPlayer
 
 	for _, name in ipairs({ "AutoShadowRaidLoader" }) do
 		local old = CoreGuiSvc:FindFirstChild(name)
@@ -20,9 +27,6 @@ do
 		loaderGui.Parent = CoreGuiSvc
 	end)
 	if not loaderGui.Parent then
-		repeat
-			task.wait()
-		until PlayersSvc.LocalPlayer
 		loaderGui.Parent = PlayersSvc.LocalPlayer:WaitForChild("PlayerGui")
 	end
 
@@ -74,6 +78,12 @@ do
 	fill.BorderSizePixel = 0
 	fill.Parent = track
 	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+
+	info.Text = "Waiting for character..."
+	local loadPlayer = PlayersSvc.LocalPlayer
+	local loadChar = loadPlayer.Character or loadPlayer.CharacterAdded:Wait()
+	loadChar:WaitForChild("HumanoidRootPart")
+	loadChar:WaitForChild("Humanoid")
 
 	local startTime = os.clock()
 	while true do
@@ -265,9 +275,6 @@ local function isImmune(enemy)
 	return WALK.ImmuneMarker ~= nil and enemy:FindFirstChild(WALK.ImmuneMarker, true) ~= nil
 end
 
-local INTERVAL_MIN = 0.01
-local INTERVAL_MAX = 2
-
 local function doClick()
 	local remote = ReplicatedStorage:FindFirstChild("performM1")
 	if not remote then
@@ -297,7 +304,7 @@ end
 
 local mainFrame = create("Frame", {
 	Name = "MainFrame",
-	Size = UDim2.fromOffset(280, 300),
+	Size = UDim2.fromOffset(280, 258),
 	Position = UDim2.new(0, 20, 0, 20),
 	BackgroundColor3 = THEME.Background,
 	BorderSizePixel = 0,
@@ -401,7 +408,7 @@ create("TextLabel", {
 local spam_button = makeButton({
 	Size = UDim2.new(1, 0, 0, 34),
 	Color = THEME.Panel,
-	Text = "Spam Q: OFF",
+	Text = "Auto Dash: OFF",
 	TextSize = 13,
 	LayoutOrder = 2,
 })
@@ -411,79 +418,17 @@ stroke(THEME.Stroke, 1).Parent = spam_button
 local click_button = makeButton({
 	Size = UDim2.new(1, 0, 0, 34),
 	Color = THEME.Panel,
-	Text = "Auto M1: OFF",
+	Text = "Auto Attack: OFF",
 	TextSize = 13,
 	LayoutOrder = 3,
 })
 click_button.Parent = mainBody
 stroke(THEME.Stroke, 1).Parent = click_button
 
-local intervalRow = create("Frame", {
-	Name = "IntervalRow",
-	Size = UDim2.new(1, 0, 0, 34),
-	BackgroundTransparency = 1,
-	LayoutOrder = 4,
-	Parent = mainBody,
-})
-
-local intervalLabel = create("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 16),
-	BackgroundTransparency = 1,
-	Text = "",
-	TextColor3 = THEME.Muted,
-	Font = Enum.Font.GothamMedium,
-	TextSize = 12,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Parent = intervalRow,
-})
-
-local sliderTrack = create("Frame", {
-	Size = UDim2.new(1, -14, 0, 6),
-	Position = UDim2.fromOffset(7, 24),
-	BackgroundColor3 = THEME.Key,
-	BorderSizePixel = 0,
-	Parent = intervalRow,
-}, { corner(3) })
-
-local sliderFill = create("Frame", {
-	Size = UDim2.new(0, 0, 1, 0),
-	BackgroundColor3 = THEME.Accent,
-	BorderSizePixel = 0,
-	Parent = sliderTrack,
-}, { corner(3) })
-
-local sliderKnob = create("Frame", {
-	Size = UDim2.fromOffset(14, 14),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0, 0, 0.5, 0),
-	BackgroundColor3 = Color3.new(1, 1, 1),
-	BorderSizePixel = 0,
-	ZIndex = 2,
-	Parent = sliderTrack,
-}, { corner(7) })
-
-local sliderHit = create("TextButton", {
-	Size = UDim2.new(1, 0, 0, 20),
-	Position = UDim2.fromOffset(0, 16),
-	BackgroundTransparency = 1,
-	Text = "",
-	AutoButtonColor = false,
-	Parent = intervalRow,
-})
-
-local function updateIntervalUI()
-
-	local alpha = math.sqrt(math.clamp((clickInterval - INTERVAL_MIN) / (INTERVAL_MAX - INTERVAL_MIN), 0, 1))
-	sliderFill.Size = UDim2.new(alpha, 0, 1, 0)
-	sliderKnob.Position = UDim2.new(alpha, 0, 0.5, 0)
-	intervalLabel.Text = string.format("Click interval  ·  %.2fs", clickInterval)
-end
-updateIntervalUI()
-
 local walk_button = makeButton({
 	Size = UDim2.new(1, 0, 0, 34),
 	Color = THEME.Panel,
-	Text = "Walk to Bots: OFF",
+	Text = "Walk to Enemies: OFF",
 	LayoutOrder = 5,
 })
 walk_button.Parent = mainBody
@@ -501,13 +446,13 @@ toggle_button.Parent = mainBody
 makeDraggable(mainHeader, mainFrame)
 
 local function refreshStatus()
-	spam_button.Text = spamEnabled and "Spam Q: ON" or "Spam Q: OFF"
+	spam_button.Text = spamEnabled and "Auto Dash: ON" or "Auto Dash: OFF"
 	setBase(spam_button, spamEnabled and THEME.Accent or THEME.Panel)
 
-	click_button.Text = clickEnabled and "Auto M1: ON" or "Auto M1: OFF"
+	click_button.Text = clickEnabled and "Auto Attack: ON" or "Auto Attack: OFF"
 	setBase(click_button, clickEnabled and THEME.Accent or THEME.Panel)
 
-	walk_button.Text = walkEnabled and "Walk to Bots: ON" or "Walk to Bots: OFF"
+	walk_button.Text = walkEnabled and "Walk to Enemies: ON" or "Walk to Enemies: OFF"
 	setBase(walk_button, walkEnabled and THEME.Accent or THEME.Panel)
 
 	if flashing then
@@ -520,10 +465,10 @@ local function refreshStatus()
 		tween(statusDot, { BackgroundColor3 = THEME.Green })
 		local parts = {}
 		if spamEnabled then
-			table.insert(parts, "Q")
+			table.insert(parts, "dash")
 		end
 		if clickEnabled then
-			table.insert(parts, "M1")
+			table.insert(parts, "attack")
 		end
 		if walkEnabled then
 			table.insert(parts, "walk")
@@ -879,7 +824,6 @@ local function saveSettings()
 		writefile(CONFIG_FILE, HttpService:JSONEncode({
 			spam = spamEnabled,
 			click = clickEnabled,
-			interval = clickInterval,
 			walk = walkEnabled,
 		}))
 	end)
@@ -908,10 +852,6 @@ local function loadSettings()
 	end
 	if decoded.walk == true then
 		walkEnabled = true
-	end
-	if type(decoded.interval) == "number" then
-		clickInterval = math.clamp(decoded.interval, INTERVAL_MIN, INTERVAL_MAX)
-		updateIntervalUI()
 	end
 
 	if spamEnabled or clickEnabled or walkEnabled then
@@ -957,40 +897,6 @@ walk_button.MouseButton1Click:Connect(function()
 	refreshStatus()
 	saveSettings()
 end)
-
-do
-	local draggingSlider = false
-
-	local function setFromX(x)
-		local alpha = math.clamp((x - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1)
-		local value = INTERVAL_MIN + (INTERVAL_MAX - INTERVAL_MIN) * alpha * alpha
-		clickInterval = math.clamp(math.floor(value * 100 + 0.5) / 100, INTERVAL_MIN, INTERVAL_MAX)
-		updateIntervalUI()
-	end
-
-	sliderHit.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			draggingSlider = true
-			setFromX(input.Position.X)
-		end
-	end)
-
-	UserInputService.InputChanged:Connect(function(input)
-		if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			setFromX(input.Position.X)
-		end
-	end)
-
-	UserInputService.InputEnded:Connect(function(input)
-		if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			draggingSlider = false
-			saveSettings()
-		end
-	end)
-end
 
 toggle_button.MouseButton1Click:Connect(function()
 	if not spamEnabled and not clickEnabled and not walkEnabled then
