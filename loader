@@ -242,6 +242,9 @@ end
 
 local SPAM_KEY = Enum.KeyCode.Q
 
+local instanceId = {}
+getgenv().AutoShadowRaidInstance = instanceId
+
 local toggle = false
 local loopRunning = false
 local flashing = false
@@ -495,7 +498,7 @@ local function runClickLoop()
 	clickLoopRunning = true
 
 	task.spawn(function()
-		while toggle do
+		while toggle and getgenv().AutoShadowRaidInstance == instanceId do
 			if clickEnabled and isInClickRange() then
 				local ok, err = pcall(doClick)
 				if not ok then
@@ -519,7 +522,7 @@ local function runSpamLoop()
 	loopRunning = true
 
 	task.spawn(function()
-		while toggle do
+		while toggle and getgenv().AutoShadowRaidInstance == instanceId do
 			if not spamEnabled or not hasEnemies() or (walkEnabled and nearTarget) then
 
 				task.wait(0.05)
