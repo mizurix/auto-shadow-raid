@@ -254,6 +254,10 @@ local isInClickRange = function()
 	return true
 end
 
+local hasEnemies = function()
+	return false
+end
+
 local walkEnabled = false
 local nearTarget = false
 
@@ -516,7 +520,7 @@ local function runSpamLoop()
 
 	task.spawn(function()
 		while toggle do
-			if not spamEnabled or (walkEnabled and nearTarget) then
+			if not spamEnabled or not hasEnemies() or (walkEnabled and nearTarget) then
 
 				task.wait(0.05)
 			else
@@ -694,6 +698,15 @@ isInClickRange = function()
 	local size = enemy:GetExtentsSize()
 	local edgeDist = math.max(dist - math.max(size.X, size.Z) / 2, 0)
 	return edgeDist <= WALK.ClickRange
+end
+
+hasEnemies = function()
+	local char = localPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
+	return getClosestEnemy(root) ~= nil
 end
 
 local function computePath(root, targetPosition)
