@@ -237,20 +237,26 @@ local function isBossModel(enemy)
 	return false
 end
 
--- 2. HEALTH STAGNATION FALLBACK
+-- 2. HEALTH STAGNATION FALLBACK (No longer deadlocks)
 local bossHealthData = {}
-local lastFailReset = tick()
 
 local function isImmune(enemy)
 	if isBossModel(enemy) then
 		-- If the UI exists, TRUST IT completely
 		if uiExists then
-			if uiImmuneState then return true else return false end
-		end
-		-- If UI is missing, use the fallback
-		local data = bossHealthData[enemy]
-		if data and data.failCount >= 2 then
-			return true
+			return uiImmuneState
+		else
+			-- If UI is missing, use the health tracker
+			local data = bossHealthData[enemy]
+			if data and data.isBuggedImmune then
+				-- Retry attacking every 5 seconds
+				if tick() - data.lastTestTime > 5 then
+					data.isBuggedImmune = false
+				else
+					return true
+				end
+			end
+			return false -- Assume vulnerable so we walk up and attack
 		end
 	end
 
@@ -551,18 +557,6 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 
 	updateRunAnimation(char, humanoid, root)
 
-	-- Reset fail count every 3 seconds to allow the script to re-test the boss
-	if tick() - lastFailReset > 3 then
-		lastFailReset = tick()
-		for enemy, data in pairs(bossHealthData) do
-			if not enemy or not enemy.Parent then
-				bossHealthData[enemy] = nil
-			else
-				data.failCount = math.max(0, data.failCount - 1)
-			end
-		end
-	end
-
 	local targetMob = getClosestEnemy(root, false)
 	local targetBoss = getClosestEnemy(root, true)
 	local activeTarget = targetMob or targetBoss
@@ -573,26 +567,21 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 		if hum then
 			local now = tick()
 			if not bossHealthData[activeTarget] then
-				bossHealthData[activeTarget] = { hp = hum.Health, time = now, failCount = 0 }
+				bossHealthData[activeTarget] = { hp = hum.Health, time = now, isBuggedImmune = false, lastTestTime = 0 }
 			else
 				local data = bossHealthData[activeTarget]
 				
-				-- If the UI exists and says NOT immune, trust it.
-				if uiExists and not uiImmuneState then
-					data.failCount = 0
-				end
-
 				if hum.Health < data.hp then
 					data.hp = hum.Health
 					data.time = now
-					data.failCount = 0 -- Health dropped, definitely vulnerable
-					uiImmuneState = false -- FORCE UI STATE TO FALSE IF HEALTH DROPS
-				else
-					-- Health is stagnant. If we are trying to attack it, count the failure.
-					if not uiExists and clickEnabled and isWithinClickRange(activeTarget) then
+					data.isBuggedImmune = false -- Health dropped, definitely vulnerable
+				elseif not uiExists then
+					-- UI is missing, so we check if we are attacking it and health is stagnant
+					if targetMob == activeTarget and isWithinClickRange(activeTarget) then
 						if now - data.time > 1.5 then
-							data.failCount = data.failCount + 1
-							data.time = now
+							data.isBuggedImmune = true
+							data.lastTestTime = now
+							data.time = now -- Reset timer so we don't spam
 						end
 					end
 				end
