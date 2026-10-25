@@ -79,7 +79,6 @@ do
 	fill.Parent = track
 	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
 
-	-- Failsafe: force-destroy the loader if anything hangs below.
 	local done = false
 	task.delay(LOAD_DELAY + 8, function()
 		if not done and loaderGui and loaderGui.Parent then
@@ -87,7 +86,6 @@ do
 		end
 	end)
 
-	-- Countdown FIRST (does not depend on character being ready).
 	info.Text = "Loading..."
 	local startTime = os.clock()
 	while true do
@@ -101,7 +99,6 @@ do
 		task.wait(0.05)
 	end
 
-	-- Countdown finished. NOW check for the character, with timeouts so it can never hang.
 	info.Text = "Checking character..."
 	local loadPlayer = PlayersSvc.LocalPlayer
 	local loadChar = loadPlayer and loadPlayer.Character
@@ -296,6 +293,7 @@ local WALK = {
 	StopDistance = 4,
 	KeyStopDistance = 6,
 	KeyResumeDistance = 9,
+	BossWaitDistance = 15, -- How close to walk to the boss while waiting for mobs
 	RecalculateDelay = 0.3,
 	WaypointReach = 3,
 	ClickRange = 8,
@@ -305,7 +303,26 @@ local WALK = {
 }
 
 local function isImmune(enemy)
-	return WALK.ImmuneMarker ~= nil and enemy:FindFirstChild(WALK.ImmuneMarker, true) ~= nil
+	if WALK.ImmuneMarker ~= nil and enemy:FindFirstChild(WALK.ImmuneMarker, true) ~= nil then
+		return true
+	end
+
+	if string.find(string.upper(enemy.Name), "IMMUNE") then
+		return true
+	end
+
+	local hum = enemy:FindFirstChildOfClass("Humanoid")
+	if hum and string.find(string.upper(hum.DisplayName), "IMMUNE") then
+		return true
+	end
+
+	for _, v in ipairs(enemy:GetDescendants()) do
+		if (v:IsA("TextLabel") or v:IsA("TextButton")) and string.find(string.upper(v.Text), "IMMUNE") then
+			return true
+		end
+	end
+
+	return false
 end
 
 local function doClick()
@@ -684,7 +701,8 @@ local function updateRunAnimation(char, humanoid, root)
 	runTrack:AdjustSpeed(math.clamp(speed / 16, 0.4, 2.5))
 end
 
-local function getClosestEnemy(root)
+-- MODIFIED: Returns the closest enemy based on whether we want immune targets (boss) or non-immune targets (normal mobs)
+local function getClosestEnemy(root, requireImmune)
 	local folder = workspace:FindFirstChild(WALK.FolderName)
 	if not folder then
 		return nil
@@ -697,11 +715,14 @@ local function getClosestEnemy(root)
 		if enemy:IsA("Model") then
 			local hum = enemy:FindFirstChildOfClass("Humanoid")
 			local targetRoot = enemy:FindFirstChild("HumanoidRootPart")
-			if hum and hum.Health > 0 and targetRoot and not isImmune(enemy) then
-				local dist = (targetRoot.Position - root.Position).Magnitude
-				if dist < shortest then
-					shortest = dist
-					closest = enemy
+			if hum and hum.Health > 0 and targetRoot then
+				local immune = isImmune(enemy)
+				if immune == requireImmune then
+					local dist = (targetRoot.Position - root.Position).Magnitude
+					if dist < shortest then
+						shortest = dist
+						closest = enemy
+					end
 				end
 			end
 		end
@@ -715,7 +736,8 @@ isInClickRange = function()
 	if not root then
 		return false
 	end
-	local enemy = getClosestEnemy(root)
+	-- Only attack NON-immune enemies
+	local enemy = getClosestEnemy(root, false)
 	if not enemy then
 		return false
 	end
@@ -735,7 +757,8 @@ hasEnemies = function()
 	if not root then
 		return false
 	end
-	return getClosestEnemy(root) ~= nil
+	-- Only return true for NON-immune enemies
+	return getClosestEnemy(root, false) ~= nil
 end
 
 local function computePath(root, targetPosition)
@@ -797,7 +820,14 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 
 	updateRunAnimation(char, humanoid, root)
 
-	local enemy = getClosestEnemy(root)
+	-- Get both normal mobs and boss targets
+	local targetMob = getClosestEnemy(root, false) -- Normal mobs
+	local targetBoss = getClosestEnemy(root, true) -- Immune bosses
+
+	-- Prioritize normal mobs. If none exist, camp near the boss.
+	local enemy = targetMob or targetBoss
+	local isWaitingForMobs = (targetMob == nil and targetBoss ~= nil)
+
 	if not enemy then
 		nearTarget = false
 		stopMoving(humanoid)
@@ -811,18 +841,22 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 	end
 
 	local dist = (targetRoot.Position - root.Position).Magnitude
-
 	local size = enemy:GetExtentsSize()
 	local bodyRadius = math.max(size.X, size.Z) / 2
 	local edgeDist = math.max(dist - bodyRadius, 0)
 
-	if edgeDist <= WALK.KeyStopDistance then
+	-- Adjust stopping distances if we are waiting at the boss
+	local stopDist = isWaitingForMobs and WALK.BossWaitDistance or WALK.StopDistance
+	local keyStopDist = isWaitingForMobs and WALK.BossWaitDistance or WALK.KeyStopDistance
+	local keyResumeDist = isWaitingForMobs and (WALK.BossWaitDistance + 3) or WALK.KeyResumeDistance
+
+	if edgeDist <= keyStopDist then
 		nearTarget = true
-	elseif edgeDist >= WALK.KeyResumeDistance then
+	elseif edgeDist >= keyResumeDist then
 		nearTarget = false
 	end
 
-	if dist <= WALK.StopDistance then
+	if dist <= stopDist then
 		stopMoving(humanoid)
 		return
 	end
@@ -836,7 +870,6 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 	local moveTarget = targetRoot.Position
 
 	if #waypoints > 0 then
-
 		local rootFlat = Vector3.new(root.Position.X, 0, root.Position.Z)
 		while currentWaypointIndex < #waypoints do
 			local wp = waypoints[currentWaypointIndex]
