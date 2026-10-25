@@ -293,7 +293,7 @@ local WALK = {
 	StopDistance = 4,
 	KeyStopDistance = 6,
 	KeyResumeDistance = 9,
-	BossWaitDistance = 15, -- How close to walk to the boss while waiting for mobs
+	BossWaitDistance = 15,
 	RecalculateDelay = 0.3,
 	WaypointReach = 3,
 	ClickRange = 8,
@@ -302,7 +302,52 @@ local WALK = {
 	ImmuneMarker = "OathBeamTo",
 }
 
+-- NEW: Scans the game UI for the word "IMMUNE" (for the top boss health bar)
+local uiImmuneState = false
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		local found = false
+		local containers = {}
+		if localPlayer then table.insert(containers, localPlayer:FindFirstChild("PlayerGui")) end
+		table.insert(containers, CoreGui)
+
+		for _, container in ipairs(containers) do
+			if container then
+				local ok, descendants = pcall(function() return container:GetDescendants() end)
+				if ok and descendants then
+					for _, v in ipairs(descendants) do
+						if (v:IsA("TextLabel") or v:IsA("TextButton")) and string.find(string.upper(v.Text), "IMMUNE") then
+							found = true
+							break
+						end
+					end
+				end
+			end
+			if found then break end
+		end
+		uiImmuneState = found
+	end
+end)
+
+local function isBossModel(enemy)
+	local name = string.lower(enemy.Name)
+	if string.find(name, "knight") or string.find(name, "boss") or string.find(name, "elite") or string.find(name, "lord") or string.find(name, "king") then
+		return true
+	end
+	local hum = enemy:FindFirstChildOfClass("Humanoid")
+	if hum and hum.MaxHealth >= 1000 then
+		return true
+	end
+	return false
+end
+
 local function isImmune(enemy)
+	-- If the UI shows [IMMUNE] and this is a boss, block it.
+	if isBossModel(enemy) and uiImmuneState then
+		return true
+	end
+
 	if WALK.ImmuneMarker ~= nil and enemy:FindFirstChild(WALK.ImmuneMarker, true) ~= nil then
 		return true
 	end
@@ -321,7 +366,6 @@ local function isImmune(enemy)
 			return true
 		end
 	end
-
 	return false
 end
 
@@ -567,7 +611,6 @@ local function runSpamLoop()
 	task.spawn(function()
 		while toggle and getgenv().AutoShadowRaidInstance == instanceId do
 			if not spamEnabled or not hasEnemies() or (walkEnabled and nearTarget) then
-
 				task.wait(0.05)
 			else
 				pcall(function()
@@ -614,7 +657,6 @@ local function stopRunTrack()
 end
 
 local function getRunAnimationId(char, humanoid)
-
 	if WALK.RunAnimationId and WALK.RunAnimationId ~= "" then
 		return WALK.RunAnimationId
 	end
@@ -701,15 +743,18 @@ local function updateRunAnimation(char, humanoid, root)
 	runTrack:AdjustSpeed(math.clamp(speed / 16, 0.4, 2.5))
 end
 
--- MODIFIED: Returns the closest enemy based on whether we want immune targets (boss) or non-immune targets (normal mobs)
+-- UPDATED: Separates Bosses and Normal Mobs. Prioritizes Normal Mobs strictly.
 local function getClosestEnemy(root, requireImmune)
 	local folder = workspace:FindFirstChild(WALK.FolderName)
 	if not folder then
 		return nil
 	end
 
-	local closest = nil
-	local shortest = WALK.MaxDistance
+	local closestNormal = nil
+	local shortestNormal = WALK.MaxDistance
+
+	local closestBoss = nil
+	local shortestBoss = WALK.MaxDistance
 
 	for _, enemy in ipairs(folder:GetChildren()) do
 		if enemy:IsA("Model") then
@@ -719,15 +764,24 @@ local function getClosestEnemy(root, requireImmune)
 				local immune = isImmune(enemy)
 				if immune == requireImmune then
 					local dist = (targetRoot.Position - root.Position).Magnitude
-					if dist < shortest then
-						shortest = dist
-						closest = enemy
+					if isBossModel(enemy) then
+						if dist < shortestBoss then
+							shortestBoss = dist
+							closestBoss = enemy
+						end
+					else
+						if dist < shortestNormal then
+							shortestNormal = dist
+							closestNormal = enemy
+						end
 					end
 				end
 			end
 		end
 	end
-	return closest
+	
+	-- Return normal mobs first, fallback to boss.
+	return closestNormal or closestBoss
 end
 
 isInClickRange = function()
@@ -736,7 +790,7 @@ isInClickRange = function()
 	if not root then
 		return false
 	end
-	-- Only attack NON-immune enemies
+	-- Only look for non-immune targets to attack
 	local enemy = getClosestEnemy(root, false)
 	if not enemy then
 		return false
@@ -757,7 +811,6 @@ hasEnemies = function()
 	if not root then
 		return false
 	end
-	-- Only return true for NON-immune enemies
 	return getClosestEnemy(root, false) ~= nil
 end
 
@@ -789,7 +842,6 @@ end
 
 local stoppedMoving = false
 local function stopMoving(humanoid)
-
 	if humanoid and not stoppedMoving then
 		stoppedMoving = true
 		humanoid:Move(Vector3.zero)
@@ -820,11 +872,11 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 
 	updateRunAnimation(char, humanoid, root)
 
-	-- Get both normal mobs and boss targets
-	local targetMob = getClosestEnemy(root, false) -- Normal mobs
-	local targetBoss = getClosestEnemy(root, true) -- Immune bosses
+	-- Get targets
+	local targetMob = getClosestEnemy(root, false) -- Normal mobs or non-immune
+	local targetBoss = getClosestEnemy(root, true) -- Immune targets (like the boss during immune phase)
 
-	-- Prioritize normal mobs. If none exist, camp near the boss.
+	-- Prioritize mobs. If none exist, camp near the boss.
 	local enemy = targetMob or targetBoss
 	local isWaitingForMobs = (targetMob == nil and targetBoss ~= nil)
 
@@ -845,7 +897,7 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 	local bodyRadius = math.max(size.X, size.Z) / 2
 	local edgeDist = math.max(dist - bodyRadius, 0)
 
-	-- Adjust stopping distances if we are waiting at the boss
+	-- If waiting for mobs, stop further away from the boss.
 	local stopDist = isWaitingForMobs and WALK.BossWaitDistance or WALK.StopDistance
 	local keyStopDist = isWaitingForMobs and WALK.BossWaitDistance or WALK.KeyStopDistance
 	local keyResumeDist = isWaitingForMobs and (WALK.BossWaitDistance + 3) or WALK.KeyResumeDistance
