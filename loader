@@ -79,12 +79,16 @@ do
 	fill.Parent = track
 	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
 
-	info.Text = "Waiting for character..."
-	local loadPlayer = PlayersSvc.LocalPlayer
-	local loadChar = loadPlayer.Character or loadPlayer.CharacterAdded:Wait()
-	loadChar:WaitForChild("HumanoidRootPart")
-	loadChar:WaitForChild("Humanoid")
+	-- Failsafe: force-destroy the loader if anything hangs below.
+	local done = false
+	task.delay(LOAD_DELAY + 8, function()
+		if not done and loaderGui and loaderGui.Parent then
+			loaderGui:Destroy()
+		end
+	end)
 
+	-- Countdown FIRST (does not depend on character being ready).
+	info.Text = "Loading..."
 	local startTime = os.clock()
 	while true do
 		local elapsed = os.clock() - startTime
@@ -97,12 +101,34 @@ do
 		task.wait(0.05)
 	end
 
+	-- Countdown finished. NOW check for the character, with timeouts so it can never hang.
+	info.Text = "Checking character..."
+	local loadPlayer = PlayersSvc.LocalPlayer
+	local loadChar = loadPlayer and loadPlayer.Character
+
+	if not loadChar and loadPlayer then
+		local ok, result = pcall(function()
+			return loadPlayer.CharacterAdded:Wait()
+		end)
+		if ok then
+			loadChar = result
+		end
+	end
+
+	if loadChar then
+		pcall(function() loadChar:WaitForChild("HumanoidRootPart", 3) end)
+		pcall(function() loadChar:WaitForChild("Humanoid", 3) end)
+	end
+
+	done = true
 	fill.Size = UDim2.new(1, 0, 1, 0)
 	fill.BackgroundColor3 = Color3.fromRGB(52, 168, 110)
 	info.Text = "Loaded!"
 	info.TextColor3 = Color3.fromRGB(52, 168, 110)
 	task.delay(0.8, function()
-		loaderGui:Destroy()
+		if loaderGui and loaderGui.Parent then
+			loaderGui:Destroy()
+		end
 	end)
 end
 
