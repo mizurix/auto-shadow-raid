@@ -219,36 +219,39 @@ task.spawn(function()
 	end
 end)
 
--- 2. FIXED BOSS IDENTIFICATION
+-- 2. STRICT BOSS IDENTIFICATION (No longer flags normal "Knights")
 local function isBossModel(enemy)
 	local name = string.lower(enemy.Name)
-	if string.find(name, "knight") or string.find(name, "boss") or string.find(name, "elite") or string.find(name, "lord") or string.find(name, "king") or string.find(name, "crimson") then
-		return true
-	end
+	-- The debug output showed the boss is named "0"
+	if name == "0" then return true end
+	if string.find(name, "boss") or string.find(name, "lord") or string.find(name, "king") or string.find(name, "crimson") then return true end
+	
 	local hum = enemy:FindFirstChildOfClass("Humanoid")
 	if hum then
 		if hum.MaxHealth >= 2000 then return true end
 		local disp = string.lower(hum.DisplayName)
-		if string.find(disp, "knight") or string.find(disp, "boss") or string.find(disp, "elite") or string.find(disp, "crimson") then return true end
+		if string.find(disp, "boss") or string.find(disp, "lord") or string.find(disp, "king") or string.find(disp, "crimson") then return true end
 	end
 	return false
 end
 
--- 3. HEALTH STAGNATION FALLBACK
+-- 3. HEALTH STAGNATION FALLBACK (Strictly for Bosses only)
 local bossHealthData = {}
 local lastFailReset = tick()
 
 local function isImmune(enemy)
-	-- Primary Check: UI
-	if isBossModel(enemy) and uiImmuneState then return true end
-	
-	-- Fallback Check: Is the boss taking damage?
-	local data = bossHealthData[enemy]
-	if data and data.failCount >= 2 then
-		return true -- UI missing, but we know it's not taking damage
+	if isBossModel(enemy) then
+		-- Primary Check: UI
+		if uiImmuneState then return true end
+		
+		-- Fallback Check: Is the boss taking damage?
+		local data = bossHealthData[enemy]
+		if data and data.failCount >= 2 then
+			return true -- UI missing, but we know it's not taking damage
+		end
 	end
 
-	-- Extra standard checks
+	-- Extra standard checks for any enemy
 	local attr = enemy:GetAttribute("Immune") or enemy:GetAttribute("Invulnerable") or enemy:GetAttribute("IsImmune")
 	if attr == true or enemy:GetAttribute("CanDamage") == false then return true end
 	if CollectionService:HasTag(enemy, "Immune") or CollectionService:HasTag(enemy, "Invulnerable") then return true end
@@ -561,8 +564,8 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 	local targetBoss = getClosestEnemy(root, true)
 	local activeTarget = targetMob or targetBoss
 	
-	-- Monitor active target health for UI bug fallback
-	if activeTarget then
+	-- Monitor active target health for UI bug fallback (ONLY FOR BOSSES)
+	if activeTarget and isBossModel(activeTarget) then
 		local hum = activeTarget:FindFirstChildOfClass("Humanoid")
 		if hum then
 			local now = tick()
