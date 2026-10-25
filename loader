@@ -188,18 +188,21 @@ local WALK = {
 	FixAnimation = true, RunAnimationId = "rbxassetid://129902810960575",
 }
 
--- 1. UI IMMUNE DETECTION
+-- 1. UI IMMUNE DETECTION (Now tracks if the UI even exists)
 local uiImmuneState = false
+local uiExists = false
 task.spawn(function()
 	while true do
 		task.wait(0.1)
 		local found = false
+		local exists = false
 		local playerGui = localPlayer:FindFirstChild("PlayerGui")
 		if playerGui then
 			local bossBar = playerGui:FindFirstChild("BossBar")
 			if bossBar then
 				local container = bossBar:FindFirstChild("Container")
 				if container and container.Visible then
+					exists = true
 					local header = container:FindFirstChild("Header")
 					if header then
 						local tag = header:FindFirstChild("Tag")
@@ -216,13 +219,12 @@ task.spawn(function()
 			end
 		end
 		uiImmuneState = found
+		uiExists = exists
 	end
 end)
 
--- 2. STRICT BOSS IDENTIFICATION (No longer flags normal "Knights")
 local function isBossModel(enemy)
 	local name = string.lower(enemy.Name)
-	-- The debug output showed the boss is named "0"
 	if name == "0" then return true end
 	if string.find(name, "boss") or string.find(name, "lord") or string.find(name, "king") or string.find(name, "crimson") then return true end
 	
@@ -235,19 +237,20 @@ local function isBossModel(enemy)
 	return false
 end
 
--- 3. HEALTH STAGNATION FALLBACK (Strictly for Bosses only)
+-- 2. HEALTH STAGNATION FALLBACK
 local bossHealthData = {}
 local lastFailReset = tick()
 
 local function isImmune(enemy)
 	if isBossModel(enemy) then
-		-- Primary Check: UI
-		if uiImmuneState then return true end
-		
-		-- Fallback Check: Is the boss taking damage?
+		-- If the UI exists, TRUST IT completely
+		if uiExists then
+			if uiImmuneState then return true else return false end
+		end
+		-- If UI is missing, use the fallback
 		local data = bossHealthData[enemy]
 		if data and data.failCount >= 2 then
-			return true -- UI missing, but we know it's not taking damage
+			return true
 		end
 	end
 
@@ -548,8 +551,8 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 
 	updateRunAnimation(char, humanoid, root)
 
-	-- Reset fail count every 10 seconds to allow the script to re-test the boss
-	if tick() - lastFailReset > 10 then
+	-- Reset fail count every 3 seconds to allow the script to re-test the boss
+	if tick() - lastFailReset > 3 then
 		lastFailReset = tick()
 		for enemy, data in pairs(bossHealthData) do
 			if not enemy or not enemy.Parent then
@@ -573,13 +576,20 @@ getgenv().MizWalkerLoop = RunService.Heartbeat:Connect(function()
 				bossHealthData[activeTarget] = { hp = hum.Health, time = now, failCount = 0 }
 			else
 				local data = bossHealthData[activeTarget]
+				
+				-- If the UI exists and says NOT immune, trust it.
+				if uiExists and not uiImmuneState then
+					data.failCount = 0
+				end
+
 				if hum.Health < data.hp then
 					data.hp = hum.Health
 					data.time = now
 					data.failCount = 0 -- Health dropped, definitely vulnerable
+					uiImmuneState = false -- FORCE UI STATE TO FALSE IF HEALTH DROPS
 				else
 					-- Health is stagnant. If we are trying to attack it, count the failure.
-					if clickEnabled and isWithinClickRange(activeTarget) then
+					if not uiExists and clickEnabled and isWithinClickRange(activeTarget) then
 						if now - data.time > 1.5 then
 							data.failCount = data.failCount + 1
 							data.time = now
